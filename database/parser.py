@@ -274,6 +274,6 @@ class Parser:
 
 if __name__ == "__main__":
     p = Parser(DATABASE_URL)
-    # p.run()
+    p.run()
     # Parser.parse(DATABASE_URL)
-    p.get_movies()
+    # p.get_movies()
