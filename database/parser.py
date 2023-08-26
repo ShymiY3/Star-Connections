@@ -79,10 +79,8 @@ class Parser:
 
     def get_movies(self):
         _, session = self.connect_db()
-        x = set(map(lambda x: x[0], session.query(Movies.id).all()))
-        with open('newfile3', 'w') as f:
-            f.write(','.join(x))
-    
+        return set(map(lambda x: x[0], session.query(Movies.id).all()))
+        
     def print_chunk_info(self, size):
         self.current_chunk.increment()
         message = f"Processing chunk: {self.current_chunk.value()}/{math.ceil(self.num_records/size)}"
