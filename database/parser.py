@@ -222,7 +222,7 @@ class Parser:
             self.name_filter = self.name_filter._getvalue()
             self.current_chunk = manager.Counter(0)
             func = self.load_ratings
-            file = "newfile.tsv"
+            file = "title_ratings.tsv"
             try:
                 self.multi_process(func=func, file=file, chunksize=500)
             except Exception as e:
