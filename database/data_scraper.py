@@ -14,7 +14,7 @@ class Data_scraper():
         self.file_dirpath = os.path.dirname(os.path.abspath(__file__))
         self.data_path = os.path.join(self.file_dirpath, 'data', 'raw')
         if not os.path.exists(self.data_path):
-            os.mkdir(self.data_path)
+            os.makedirs(self.data_path)
         self.files_to_download = ('title.crew.tsv.gz', 'title.episode.tsv.gz')
     
     def get_name(self, archive):
