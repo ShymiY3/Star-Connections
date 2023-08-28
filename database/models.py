@@ -15,9 +15,9 @@ class Movies(Base):
     original_title = Column(String, nullable=False)  # originalTitle
     start_year = Column(Integer)  # startYear
 
-    aka = relationship("Akas", back_populates="movie")
-    rating = relationship("Ratings", back_populates="movie")
-    cast = relationship("Cast", back_populates="movie")
+    aka = relationship("Akas", back_populates="movie", cascade='all, delete-orphan')
+    rating = relationship("Ratings", back_populates="movie", cascade='all, delete-orphan')
+    cast = relationship("Cast", back_populates="movie", cascade='all, delete-orphan')
 
 
 class Akas(Base):
@@ -25,7 +25,7 @@ class Akas(Base):
     __tablename__ = "akas"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    movie_id = Column(String, ForeignKey("movies.id"), nullable=False)  # titleId
+    movie_id = Column(String, ForeignKey("movies.id", ondelete='CASCADE'), nullable=False)  # titleId
     title = Column(String, index=True, nullable=False)  # title
     region = Column(String, nullable=False)  # region
 
@@ -40,7 +40,7 @@ class Actors(Base):
     birth_year = Column(Integer, nullable=False)  # birthYear
     death_year = Column(Integer)  # deathYear
 
-    cast = relationship("Cast", back_populates="actor")
+    cast = relationship("Cast", back_populates="actor", cascade='all, delete-orphan')
 
 
 class Cast(Base):
@@ -48,8 +48,8 @@ class Cast(Base):
     __tablename__ = "cast"
 
     id = Column(Integer, index=True, primary_key=True, autoincrement=True)
-    movie_id = Column(String, ForeignKey("movies.id"), nullable=False)
-    actor_id = Column(String, ForeignKey("actors.id"), nullable=False)
+    movie_id = Column(String, ForeignKey("movies.id", ondelete='CASCADE'), nullable=False)
+    actor_id = Column(String, ForeignKey("actors.id", ondelete='CASCADE'), nullable=False)
     characters = Column(String)
 
     movie = relationship("Movies", back_populates="cast")
@@ -61,7 +61,7 @@ class Ratings(Base):
     __tablename__ = "ratings"
 
     id = Column(Integer, index=True, primary_key=True, autoincrement=True)
-    movie_id = Column(String, ForeignKey("movies.id"), nullable=False)
+    movie_id = Column(String, ForeignKey("movies.id", ondelete='CASCADE'), nullable=False)
     average = Column(Float, nullable=False)
     num_votes = Column(Integer, nullable=False)
 

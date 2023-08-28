@@ -12,7 +12,7 @@ class Data_scraper():
             raise Exception("Can't access a page")
         self.soup = BeautifulSoup(self.request.text, 'html.parser')
         self.file_dirpath = os.path.dirname(os.path.abspath(__file__))
-        self.data_path = os.path.join(self.file_dirpath, 'data')
+        self.data_path = os.path.join(self.file_dirpath, 'data', 'raw')
         if not os.path.exists(self.data_path):
             os.mkdir(self.data_path)
         self.files_to_download = ('title.crew.tsv.gz', 'title.episode.tsv.gz')

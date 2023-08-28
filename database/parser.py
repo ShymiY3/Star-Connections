@@ -4,36 +4,44 @@ import functools
 import math
 import multiprocessing as mp
 import time
+import shutil
+import psycopg2
 from multiprocessing.managers import BaseManager
-from database import DATABASE_URL
-from models import Movies
 from typing import Iterable, Callable
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from itertools import repeat
+from database import DATABASE_URL
+
+
+def init_pool_processes(the_lock):
+    """Initialize each process with a global variable lock."""
+    global lock
+    lock = the_lock
 
 
 def print_status(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start = time.time_ns()
-        message = f'{kwargs.get("file")}: Parsing data from file'
+        message = f'{kwargs.get("file")}: Transforming data from file'
         print(message, flush=True)
         result = func(*args, **kwargs)
-        print(f'\nRuntime of function {func.__name__}: {(time.time_ns() - start)/1e9:.3f}')
-        print(f'{kwargs.get("file")}: Data parsed from file')
+        print(
+            f"\nRuntime of function {func.__name__}: {(time.time_ns() - start)/1e9:.3f}"
+        )
+        print(f'{kwargs.get("file")}: Data transformed from file')
         return result
+
     return wrapper
+
 
 class Counter(object):
     def __init__(self, initval=0):
-        self.val = mp.Value('i', initval)
+        self.val = mp.Value("i", initval)
         self.lock = mp.Lock()
 
     def value(self):
         with self.lock:
             return self.val.value
-    
+
     def increment(self):
         with self.lock:
             self.val.value += 1
@@ -42,23 +50,26 @@ class Counter(object):
 class Parser:
     class CustomManager(BaseManager):
         pass
-    
-    
+
     def __init__(self, db_url) -> None:
-        self.db_url = db_url
         self.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        self.raw_dir = os.path.join(self.data_dir, "raw")
+        self.transformed_dir = os.path.join(self.data_dir, "transformed")
+        self.database_url = db_url
+        if not os.path.exists(self.transformed_dir):
+            os.mkdir(self.transformed_dir)
         self.CustomManager.register("set", set)
         self.CustomManager.register("Counter", Counter)
         self.title_filter = set()
         self.name_filter = set()
         self.current_chunk = 0
         self.num_records = 0
-        
+
     def chunk_loader(
         self, file: str, cols: Iterable | None = None, chunksize: int = 1000
     ):
         for chunk in pd.read_csv(
-            os.path.join(self.data_dir, file),
+            file,
             delimiter="\t",
             chunksize=chunksize,
             na_values="\\N",
@@ -66,31 +77,46 @@ class Parser:
         ):
             yield chunk
 
-    def connect_db(self):
-        engine = create_engine(self.db_url)
-        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        return engine, Session()
+    def file_loader(self, ignore_files=[]):
+        for file in os.listdir(self.transformed_dir):
+            if file.endswith(".csv") and file.rstrip(".csv") not in ignore_files:
+                yield os.path.join(self.transformed_dir, file), file.rstrip(".csv")
 
-    def load_to_db(self, chunk: pd.DataFrame, table: str):
-        engine, session = self.connect_db()
-        chunk.to_sql(table, engine, if_exists="append", index=False)
-        session.commit()
-        session.close()
+    def load_to_db(
+        self,
+        file_path,
+        table: str,
+    ):
+        try:
+            with open(file_path, encoding="UTF-8") as file:
+                conn = psycopg2.connect(self.database_url)
+                cursor = conn.cursor()
+                cmd = f"COPY {table} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
+                cursor.copy_expert(cmd, file)
+                conn.commit()
+        except Exception as e:
+            return f"Couldn't load data to table {table}. Error: {e}"
 
-    def get_movies(self):
-        _, session = self.connect_db()
-        return set(map(lambda x: x[0], session.query(Movies.id).all()))
-        
+    def save_to_file(self, chunk: pd.DataFrame, table: str):
+        file_path = os.path.join(self.transformed_dir, f"{table}.csv")
+
+        lock.acquire()
+        with open(file_path, "a", encoding="UTF-8") as f:
+            if f.tell() == 0:
+                chunk.to_csv(f, header=True, index=False, lineterminator="\n")
+                lock.release()
+                return
+            chunk.to_csv(f, header=False, index=False, lineterminator="\n")
+        lock.release()
+
     def print_chunk_info(self, size):
         self.current_chunk.increment()
         message = f"Processing chunk: {self.current_chunk.value()}/{math.ceil(self.num_records/size)}"
         print("\r" + " " * len(message), end="", flush=True)
-        print(f"\r{message}" + ' '*6, end="", flush=True)
-        
-    
-    
+        print(f"\r{message}" + " " * 6, end="", flush=True)
+
     @print_status
-    def multi_process(
+    def multi_process_transform(
         self,
         func: Callable,
         file: str,
@@ -98,17 +124,37 @@ class Parser:
         num_processes: int = mp.cpu_count(),
         cols: Iterable | None = None,
     ):
-        file_path = os.path.join(self.data_dir, file)
-        
-        with open(file_path, encoding='UTF-8') as f:
-            self.num_records = sum(1 for _ in f)
+        file_path = os.path.join(self.raw_dir, file)
 
+        with open(file_path, encoding="UTF-8") as f:
+            self.num_records = sum(1 for _ in f)
+        lock = mp.Lock()
+        with mp.Pool(
+            processes=num_processes, initializer=init_pool_processes, initargs=(lock,)
+        ) as pool:
+            pool.map(func, self.chunk_loader(file_path, cols, chunksize))
+
+    def multi_process_load(
+        self, num_processes: int = mp.cpu_count(), ignore_files: Iterable = []
+    ):
+        results = None
+        start_time = time.time_ns()
+        print("Starting loading data")
         with mp.Pool(processes=num_processes) as pool:
-            pool.map(func, self.chunk_loader(file, cols, chunksize))
+            results = pool.starmap(self.load_to_db, self.file_loader(ignore_files))
+        print("End of loading data")
+        print(
+            f"\nRuntime of function multi_process_load: {(time.time_ns() - start_time)/1e9:.3f}"
+        )
+        return results
+
     # -----------------------------------------
-    # LOADING FUNCTIONS
+    # Transforming FUNCTIONS
     # -----------------------------------------
-    def load_title_basics(self, chunk: pd.DataFrame, ):
+    def transform_title_basics(
+        self,
+        chunk: pd.DataFrame,
+    ):
         column_mapping = {
             "tconst": "id",
             "originalTitle": "original_title",
@@ -124,21 +170,44 @@ class Parser:
         chunk_copy = chunk_copy[movie_filter]
         chunk_copy.drop(columns=["titleType"], inplace=True)
         chunk_copy.dropna(how="any", inplace=True)
+        chunk_copy["start_year"] = chunk_copy["start_year"].astype(int)
         if not chunk_copy.empty:
             self.title_filter.update(chunk_copy["id"])
-            self.load_to_db(chunk_copy, "movies")
+            self.save_to_file(chunk_copy, "movies")
 
-    def load_title_akas(self, chunk: pd.DataFrame):
+    def transform_title_akas(self, chunk: pd.DataFrame):
         column_mapping = {"titleId": "movie_id"}
 
-    def load_title_principals(self, chunk: pd.DataFrame):
+        self.print_chunk_info(chunk.shape[0])
+        chunk_copy = chunk.rename(columns=column_mapping)
+        chunk_copy.dropna(how="any", inplace=True)
+        akas_filter = (chunk_copy["movie_id"].isin(self.title_filter)) & (
+            chunk_copy["region"].isin(("PL", "US"))
+        )
+        chunk_copy = chunk_copy[akas_filter]
+        if not chunk_copy.empty:
+            self.save_to_file(chunk_copy, "akas")
+
+    def transform_title_principals(self, chunk: pd.DataFrame):
         column_mapping = {
             "tconst": "movie_id",
             "nconst": "actor_id",
         }
         self.print_chunk_info(chunk.shape[0])
+        chunk_copy = chunk.rename(columns=column_mapping)
+        cols_without_na = [col for col in chunk_copy.columns if col != "characters"]
+        cast_filter = (chunk_copy["movie_id"].isin(self.title_filter)) & (
+            chunk_copy["category"].isin(("actor", "actress"))
+        )
+        chunk_copy = chunk_copy[cast_filter]
+        chunk_copy.drop(columns=["category"], inplace=True)
+        chunk_copy.dropna(how="any", subset=cols_without_na, inplace=True)
 
-    def load_name_basics(self, chunk: pd.DataFrame):
+        if not chunk_copy.empty:
+            self.name_filter.update(chunk_copy["actor_id"])
+            self.save_to_file(chunk_copy, "cast")
+
+    def transform_name_basics(self, chunk: pd.DataFrame):
         column_mapping = {
             "nconst": "id",
             "primaryName": "name",
@@ -146,8 +215,18 @@ class Parser:
             "deathYear": "death_year",
         }
         self.print_chunk_info(chunk.shape[0])
+        chunk_copy = chunk.rename(columns=column_mapping)
+        cols_without_na = [col for col in chunk_copy.columns if col != "death_year"]
+        chunk_copy.dropna(how="any", subset=cols_without_na, inplace=True)
+        ratings_filter = chunk_copy["id"].isin(self.name_filter)
+        chunk_copy = chunk_copy[ratings_filter]
+        chunk_copy[["start_year", "death_year"]] = chunk_copy[
+            ["start_year", "death_year"]
+        ].astype(int)
+        if not chunk_copy.empty:
+            self.save_to_file(chunk_copy, "actors")
 
-    def load_ratings(self, chunk: pd.DataFrame):
+    def transform_ratings(self, chunk: pd.DataFrame):
         column_mapping = {
             "tconst": "movie_id",
             "averageRating": "average",
@@ -159,33 +238,49 @@ class Parser:
         ratings_filter = chunk_copy["movie_id"].isin(self.title_filter)
         chunk_copy = chunk_copy[ratings_filter]
         if not chunk_copy.empty:
-            self.load_to_db(chunk_copy, "ratings")
-        
-    def run(self):
+            self.save_to_file(chunk_copy, "ratings")
+
+    def run(self, load_db=False, delete_raw=False, delete_transformed=False):
         errors = []
-        name_flag = True
-        title_flag = True
+        name_flag = False
+        title_flag = False
+
         with self.CustomManager() as manager:
             self.title_filter = manager.set()
             self.name_filter = manager.set()
+
+            # MOVIES
             self.current_chunk = manager.Counter(0)
-            # func = self.load_title_basics
-            # file = "title_basics.tsv"
-            # try:
-            #     self.multi_process(
-            #         func=func,
-            #         file=file,
-            #         cols=["tconst", "titleType", "originalTitle", "startYear"],
-            #     )
-            #     title_flag = False
-            #     self.flag = True
-            # except Exception as e:
-            #     errors.append((func.__name__, file, e))
-            #     print(f"\n{file}: Failed to parse from file")
-            self.title_filter = self.title_filter._getvalue()
-            self.current_chunk = manager.Counter(0)
-            if title_flag:
-                self.title_filter = self.get_movies()
+            func = self.transform_title_basics
+            file = "title_basics.tsv"
+            try:
+                self.multi_process_transform(
+                    func=func,
+                    file=file,
+                    cols=["tconst", "titleType", "originalTitle", "startYear"],
+                    chunksize=5000,
+                )
+                self.title_filter = self.title_filter._getvalue()
+                if self.title_filter:
+                    with open(
+                        os.path.join(self.data_dir, "title_filter.csv"),
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
+                        f.write(",".join(self.title_filter))
+                title_flag = True
+            except Exception as e:
+                errors.append((func.__name__, file, e))
+                print(f"\n{file}: Failed to parse from file")
+
+            if not title_flag:
+                self.title_filter = set()
+                filter_path = os.path.join(self.data_dir, "title_filter.csv")
+                if os.path.exists(filter_path):
+                    with open(filter_path, encoding="UTF-8") as f:
+                        self.title_filter.update(f.readline().split(","))
+                    print("Downloading ids of movies")
+                    print(f"Downloaded {len(self.title_filter)} ids")
                 if not self.title_filter:
                     errors_str = "\n\n".join(
                         [
@@ -196,58 +291,88 @@ class Parser:
                     raise Exception(
                         f"\nFirst must be loaded the title_basics file\n{errors_str}"
                     )
-                print("Downloading ids of movies")
-                print(f'Downloaded {len(self.title_filter)} ids')
 
             # AKAS
-            # func = self.load_title_akas
-            # file = "title_akas.tsv"
-            # try:
-            #     self.multi_process(func=func, file=file)
-            # except Exception as e:
-            #     errors.append((func.__name__, file, e))
-            #     print(f"\n{file}: Failed to parse from file")
-
-            # CAST
-            # func = self.load_title_principals
-            # file = "title_principals.tsv"
-            # try:
-            #     self.multi_process(func=func, file=file)
-            #     name_flag = False
-            # except Exception as e:
-            #     errors.append((func.__name__, file, e))
-            #     print(f"\n{file}: Failed to parse from file")
-
-            # RATINGS
-            self.name_filter = self.name_filter._getvalue()
             self.current_chunk = manager.Counter(0)
-            func = self.load_ratings
-            file = "title_ratings.tsv"
+            func = self.transform_title_akas
+            file = "title_akas.tsv"
             try:
-                self.multi_process(func=func, file=file, chunksize=500)
+                self.multi_process_transform(
+                    func=func,
+                    file=file,
+                    cols=["titleId", "title", "region"],
+                    chunksize=5000,
+                )
             except Exception as e:
                 errors.append((func.__name__, file, e))
                 print(f"\n{file}: Failed to parse from file")
 
-            # if name_flag:
-            #     errors_str = "\n\n".join(
-            #         [
-            #             f"Function: {func} operating on file {file} raised error:\n{error}"
-            #             for func, file, error in errors
-            #         ]
-            #     )
-            #     raise Exception(
-            #         f"\nFirst must be loaded the title_principals file\n{errors_str}"
-            #     )
+            # CAST
+            func = self.transform_title_principals
+            file = "title_principals.tsv"
+            try:
+                self.multi_process_transform(
+                    func=func,
+                    file=file,
+                    cols=["tconst", "nconst", "category", "characters"],
+                    chunksize=5000,
+                )
+                self.title_filter = self.title_filter._getvalue()
+                if self.title_filter:
+                    with open(
+                        os.path.join(self.data_dir, "name_filter.csv"),
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
+                        f.write(",".join(self.title_filter))
+                name_flag = True
+            except Exception as e:
+                errors.append((func.__name__, file, e))
+                print(f"\n{file}: Failed to parse from file")
+
+            # RATINGS
+            self.name_filter = self.name_filter._getvalue()
+            self.current_chunk = manager.Counter(0)
+            func = self.transform_ratings
+            file = "title_ratings.tsv"
+            try:
+                self.multi_process_transform(func=func, file=file, chunksize=500)
+            except Exception as e:
+                errors.append((func.__name__, file, e))
+                print(f"\n{file}: Failed to parse from file")
+
+            if name_flag:
+                self.name_filter = set()
+                filter_path = os.path.join(self.data_dir, "name_filter.csv")
+                if os.path.exists(filter_path):
+                    with open(filter_path, encoding="UTF-8") as f:
+                        self.name_filter.update(f.readline().split(","))
+                    print("Downloading ids of actors")
+                    print(f"Downloaded {len(self.name_filter)} ids")
+                if not self.name_filter:
+                    errors_str = "\n\n".join(
+                        [
+                            f"Function: {func} operating on file {file} raised error:\n{error}"
+                            for func, file, error in errors
+                        ]
+                    )
+                    raise Exception(
+                        f"\nFirst must be loaded the title_principals file\n{errors_str}"
+                    )
 
             # ACTORS
-            # func = self.load_name_basics
-            # file = "name_basics.tsv"
-            # try:
-            #     self.multi_process(func=func, file=file)
-            # except Exception as e:
-            #     errors.append((func.__name__, file, e))
-            #     print(f"\n{file}: Failed to parse from file")
+            func = self.transform_name_basics
+            file = "name_basics.tsv"
+            try:
+                self.multi_process_transform(
+                    func=func,
+                    file=file,
+                    cols=["nconst", "primaryName", "birthYear", "deathYear"],
+                    chunksize=5000,
+                )
+            except Exception as e:
+                errors.append((func.__name__, file, e))
+                print(f"\n{file}: Failed to parse from file")
 
             if errors:
                 errors_str = "\n\n".join(
@@ -258,22 +383,53 @@ class Parser:
                 )
                 print(errors_str)
 
-    @classmethod
-    def parse(cls, db_url: str):
-        try:
-            instance = cls(db_url)
-            instance.run()
-            return instance
-        except Exception as e:
-            print(f"\nError occurred: {e}\n\nTrying to execute one more time.\n")
-            try:
-                instance.run()
-            except Exception as e:
-                print(f"\nError occurred again: {e}\n\nAborting parsing")
+            if load_db:
+                if not os.listdir(self.transformed_dir):
+                    print("No data to transform")
+                else:
+                    info = self.multi_process_load()
+                    if info:
+                        print(*info, sep="\n")
+
+            if delete_raw:
+                try:
+                    shutil.rmtree(self.raw_dir)
+                except Exception as e:
+                    print(f"Could't remove raw data. Error: {e}")
+                else:
+                    print("Raw data deleted successfully")
+
+            if delete_transformed:
+                try:
+                    shutil.rmtree(self.transformed_dir)
+                except Exception as e:
+                    print(f"Could't remove transformed data. Error: {e}")
+                else:
+                    print("Transformed data deleted successfully")
+
+
+def load_arg_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-l", "--load_db", action="store_true", help="Enable loading the database."
+    )
+
+    parser.add_argument(
+        "-dr", "--delete_raw", action="store_true", help="Enable deleting raw data."
+    )
+
+    parser.add_argument(
+        "-dt" "--delete_transformed",
+        action="store_true",
+        help="Enable deleting transformed data.",
+    )
+    return parser
 
 
 if __name__ == "__main__":
+    arg_parser = load_arg_parser()
     p = Parser(DATABASE_URL)
-    p.run()
-    # Parser.parse(DATABASE_URL)
-    # p.get_movies()
+    p.run(load_db=False, delete_raw=False, delete_transformed=False)
+    # p.run(load_db=arg_parser.load_db, delete_raw=arg_parser.delete_raw, delete_transformed=arg_parser.delete_transformed)
