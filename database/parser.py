@@ -331,7 +331,8 @@ class Parser:
                         cols=["tconst", "nconst", "category", "characters"],
                         chunksize=5000,
                     )
-                    if self.title_filter:
+                    if self.name_filter:
+                        self.name_filter = self.name_filter._getvalue()
                         with open(
                             os.path.join(self.data_dir, "name_filter.csv"),
                             "w",
@@ -344,7 +345,6 @@ class Parser:
                     print(f"\n{file}: Failed to parse from file")
 
                 # RATINGS
-                self.name_filter = self.name_filter._getvalue()
                 self.current_chunk = manager.Counter(0)
                 func = self.transform_ratings
                 file = "title_ratings.tsv"
