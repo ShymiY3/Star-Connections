@@ -37,8 +37,8 @@ class Actors(Base):
 
     id = Column(String, index=True, primary_key=True, autoincrement=False)  # nconst
     name = Column(String, index=True, nullable=False)  # primaryName
-    birth_year = Column(Integer, nullable=False)  # birthYear
-    death_year = Column(Integer)  # deathYear
+    birth_year = Column(Float)  # birthYear
+    death_year = Column(Float)  # deathYear
 
     cast = relationship("Cast", back_populates="actor", cascade='all, delete-orphan')
 

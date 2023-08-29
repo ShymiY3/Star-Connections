@@ -134,11 +134,11 @@ class Parser:
 
     def load_all(self, ignore_files: Iterable = []):
         transformed_files = [
-            # "movies.csv",
-            # "actors.csv",
+            "movies.csv",
+            "actors.csv",
             "cast.csv",
-            # "akas.csv",
-            # "ratings.csv",
+            "akas.csv",
+            "ratings.csv",
         ]
 
         files = filter(lambda x: x not in ignore_files, transformed_files)
@@ -226,8 +226,6 @@ class Parser:
         }
         self.print_chunk_info(chunk.shape[0])
         chunk_copy = chunk.rename(columns=column_mapping)
-        cols_without_na = [col for col in chunk_copy.columns if col != "death_year"]
-        chunk_copy.dropna(how="any", subset=cols_without_na, inplace=True)
         ratings_filter = chunk_copy["id"].isin(self.name_filter)
         chunk_copy = chunk_copy[ratings_filter]
 
@@ -240,8 +238,8 @@ class Parser:
             "averageRating": "average",
             "numVotes": "num_votes",
         }
-        self.print_chunk_info(chunk.shape[0])
         chunk_copy = chunk.rename(columns=column_mapping)
+        self.print_chunk_info(chunk.shape[0])
         chunk_copy.dropna(how="any", inplace=True)
         ratings_filter = chunk_copy["movie_id"].isin(self.title_filter)
         chunk_copy = chunk_copy[ratings_filter]
@@ -328,8 +326,8 @@ class Parser:
                         cols=["tconst", "nconst", "category", "characters"],
                         chunksize=5000,
                     )
+                    self.name_filter = self.name_filter._getvalue()
                     if self.name_filter:
-                        self.name_filter = self.name_filter._getvalue()
                         with open(
                             os.path.join(self.data_dir, "name_filter.csv"),
                             "w",
