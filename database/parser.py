@@ -86,11 +86,11 @@ class Parser:
             with open(file_path, encoding="UTF-8") as file:
                 conn = create_engine(self.database_url).raw_connection()
                 cursor = conn.cursor()
-                cmd = f"COPY {table}({file.readline()}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
+                cmd = f'COPY "{table}"({file.readline()}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE)'
                 cursor.copy_expert(cmd, file)
                 conn.commit()
         except Exception as e:
-            raise f"Couldn't load data to table {table}. Error: {e}"
+            raise Exception(f"Couldn't load data to table {table}. Error: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -136,9 +136,9 @@ class Parser:
         transformed_files = [
             # "movies.csv",
             # "actors.csv",
-            # "cast.csv",
-            "akas.csv",
-            "ratings.csv",
+            "cast.csv",
+            # "akas.csv",
+            # "ratings.csv",
         ]
 
         files = filter(lambda x: x not in ignore_files, transformed_files)
@@ -420,12 +420,12 @@ class Parser:
                 print("Transformed data deleted successfully")
 
 
-def load_arg_parser():
+def load_args():
     import argparse
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Script to transform and load previous extracted data from data_scraper.py")
     parser.add_argument(
-        "-l", "--load_db", action="store_true", help="Enable loading the database."
+        "-nL", "--load_db", action="store_false", help="Disable loading to the database."
     )
 
     parser.add_argument(
@@ -433,27 +433,27 @@ def load_arg_parser():
     )
 
     parser.add_argument(
-        "-dt" "--delete_transformed",
+        "-dt", "--delete_transformed",
         action="store_true",
         help="Enable deleting transformed data.",
     )
 
     parser.add_argument(
-        "-nt",
+        "-nT",
         "--not_transform",
-        action="store_true",
+        action="store_false",
         help="Disable data transformation",
     )
-    return parser
+    
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    arg_parser = load_arg_parser()
+    args = load_args()
     p = Parser(DATABASE_URL)
-    # p.run(load_db=False, delete_raw=False, delete_transformed=False, transform=True)
     p.run(
-        load_db=arg_parser.load_db,
-        delete_raw=arg_parser.delete_raw,
-        delete_transformed=arg_parser.delete_transformed,
-        transform= not (arg_parser.not_transform),
+        load_db=args.load_db,
+        delete_raw=args.delete_raw,
+        delete_transformed=args.delete_transformed,
+        transform=args.not_transform
     )
