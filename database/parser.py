@@ -230,9 +230,6 @@ class Parser:
         chunk_copy.dropna(how="any", subset=cols_without_na, inplace=True)
         ratings_filter = chunk_copy["id"].isin(self.name_filter)
         chunk_copy = chunk_copy[ratings_filter]
-        chunk_copy[["birth_year", "death_year"]] = chunk_copy[
-            ["birth_year", "death_year"]
-        ].astype(int)
 
         if not chunk_copy.empty:
             self.save_to_file(chunk_copy, "actors")
