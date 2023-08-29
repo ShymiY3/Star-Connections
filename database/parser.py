@@ -5,7 +5,7 @@ import math
 import multiprocessing as mp
 import time
 import shutil
-import psycopg2
+from sqlalchemy import create_engine
 from multiprocessing.managers import BaseManager
 from typing import Iterable, Callable
 from database import DATABASE_URL
@@ -77,11 +77,6 @@ class Parser:
         ):
             yield chunk
 
-    def file_loader(self, ignore_files=[]):
-        for file in os.listdir(self.transformed_dir):
-            if file.endswith(".csv") and file.rstrip(".csv") not in ignore_files:
-                yield os.path.join(self.transformed_dir, file), file.rstrip(".csv")
-
     def load_to_db(
         self,
         file_path,
@@ -89,13 +84,16 @@ class Parser:
     ):
         try:
             with open(file_path, encoding="UTF-8") as file:
-                conn = psycopg2.connect(self.database_url)
+                conn = create_engine(self.database_url).raw_connection()
                 cursor = conn.cursor()
-                cmd = f"COPY {table} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
+                cmd = f"COPY {table}({file.readline()}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
                 cursor.copy_expert(cmd, file)
                 conn.commit()
         except Exception as e:
-            return f"Couldn't load data to table {table}. Error: {e}"
+            raise f"Couldn't load data to table {table}. Error: {e}"
+        finally:
+            cursor.close()
+            conn.close()
 
     def save_to_file(self, chunk: pd.DataFrame, table: str):
         file_path = os.path.join(self.transformed_dir, f"{table}.csv")
@@ -134,19 +132,31 @@ class Parser:
         ) as pool:
             pool.map(func, self.chunk_loader(file_path, cols, chunksize))
 
-    def multi_process_load(
-        self, num_processes: int = mp.cpu_count(), ignore_files: Iterable = []
-    ):
-        results = None
-        start_time = time.time_ns()
-        print("Starting loading data")
-        with mp.Pool(processes=num_processes) as pool:
-            results = pool.starmap(self.load_to_db, self.file_loader(ignore_files))
-        print("End of loading data")
-        print(
-            f"\nRuntime of function multi_process_load: {(time.time_ns() - start_time)/1e9:.3f}"
-        )
-        return results
+    def load_all(self, ignore_files: Iterable = []):
+        transformed_files = [
+            # "movies.csv",
+            # "actors.csv",
+            # "cast.csv",
+            "akas.csv",
+            "ratings.csv",
+        ]
+
+        files = filter(lambda x: x not in ignore_files, transformed_files)
+
+        for file in files:
+            print(f"Starting loading data {file}")
+            start_time = time.time_ns()
+            try:
+                self.load_to_db(
+                    os.path.join(self.transformed_dir, file), file.rsplit(".csv", 1)[0]
+                )
+            except Exception as e:
+                print(e)
+            else:
+                print("End of loading data")
+                print(
+                    f"Data {file} loaded. Runtime: {(time.time_ns() - start_time)/1e9:.3f}"
+                )
 
     # -----------------------------------------
     # Transforming FUNCTIONS
@@ -223,6 +233,7 @@ class Parser:
         chunk_copy[["birth_year", "death_year"]] = chunk_copy[
             ["birth_year", "death_year"]
         ].astype(int)
+
         if not chunk_copy.empty:
             self.save_to_file(chunk_copy, "actors")
 
@@ -240,173 +251,173 @@ class Parser:
         if not chunk_copy.empty:
             self.save_to_file(chunk_copy, "ratings")
 
-    def run(self, load_db=False, delete_raw=False, delete_transformed=False):
+    def run(
+        self, load_db=False, delete_raw=False, delete_transformed=False, transform=True
+    ):
         errors = []
         name_flag = False
         title_flag = False
+        if transform:
+            with self.CustomManager() as manager:
+                self.title_filter = manager.set()
+                self.name_filter = manager.set()
 
-        with self.CustomManager() as manager:
-            self.title_filter = manager.set()
-            self.name_filter = manager.set()
+                # MOVIES
+                self.current_chunk = manager.Counter(0)
+                func = self.transform_title_basics
+                file = "title_basics.tsv"
+                try:
+                    self.multi_process_transform(
+                        func=func,
+                        file=file,
+                        cols=["tconst", "titleType", "originalTitle", "startYear"],
+                        chunksize=5000,
+                    )
+                    self.title_filter = self.title_filter._getvalue()
+                    if self.title_filter:
+                        with open(
+                            os.path.join(self.data_dir, "title_filter.csv"),
+                            "w",
+                            encoding="utf-8",
+                        ) as f:
+                            f.write(",".join(self.title_filter))
+                    title_flag = True
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Failed to parse from file")
 
-            # MOVIES
-            self.current_chunk = manager.Counter(0)
-            func = self.transform_title_basics
-            file = "title_basics.tsv"
-            try:
-                self.multi_process_transform(
-                    func=func,
-                    file=file,
-                    cols=["tconst", "titleType", "originalTitle", "startYear"],
-                    chunksize=5000,
-                )
-                self.title_filter = self.title_filter._getvalue()
-                if self.title_filter:
-                    with open(
-                        os.path.join(self.data_dir, "title_filter.csv"),
-                        "w",
-                        encoding="utf-8",
-                    ) as f:
-                        f.write(",".join(self.title_filter))
-                title_flag = True
-            except Exception as e:
-                errors.append((func.__name__, file, e))
-                print(f"\n{file}: Failed to parse from file")
+                if not title_flag:
+                    self.title_filter = set()
+                    filter_path = os.path.join(self.data_dir, "title_filter.csv")
+                    if os.path.exists(filter_path):
+                        with open(filter_path, encoding="UTF-8") as f:
+                            self.title_filter.update(f.readline().split(","))
+                        print("Downloading ids of movies")
+                        print(f"Downloaded {len(self.title_filter)} ids")
+                    if not self.title_filter:
+                        errors_str = "\n\n".join(
+                            [
+                                f"Function: {func} operating on file {file} raised error:\n{error}"
+                                for func, file, error in errors
+                            ]
+                        )
+                        raise Exception(
+                            f"\nFirst must be loaded the title_basics file\n{errors_str}"
+                        )
 
-            if not title_flag:
-                self.title_filter = set()
-                filter_path = os.path.join(self.data_dir, "title_filter.csv")
-                if os.path.exists(filter_path):
-                    with open(filter_path, encoding="UTF-8") as f:
-                        self.title_filter.update(f.readline().split(","))
-                    print("Downloading ids of movies")
-                    print(f"Downloaded {len(self.title_filter)} ids")
-                if not self.title_filter:
+                # AKAS
+                self.current_chunk = manager.Counter(0)
+                func = self.transform_title_akas
+                file = "title_akas.tsv"
+                try:
+                    self.multi_process_transform(
+                        func=func,
+                        file=file,
+                        cols=["titleId", "title", "region"],
+                        chunksize=5000,
+                    )
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Failed to parse from file")
+
+                # CAST
+                self.current_chunk = manager.Counter(0)
+                func = self.transform_title_principals
+                file = "title_principals.tsv"
+                try:
+                    self.multi_process_transform(
+                        func=func,
+                        file=file,
+                        cols=["tconst", "nconst", "category", "characters"],
+                        chunksize=5000,
+                    )
+                    if self.title_filter:
+                        with open(
+                            os.path.join(self.data_dir, "name_filter.csv"),
+                            "w",
+                            encoding="utf-8",
+                        ) as f:
+                            f.write(",".join(self.name_filter))
+                    name_flag = True
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Failed to parse from file")
+
+                # RATINGS
+                self.name_filter = self.name_filter._getvalue()
+                self.current_chunk = manager.Counter(0)
+                func = self.transform_ratings
+                file = "title_ratings.tsv"
+                try:
+                    self.multi_process_transform(func=func, file=file, chunksize=500)
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Failed to parse from file")
+
+                if not name_flag:
+                    self.name_filter = set()
+                    filter_path = os.path.join(self.data_dir, "name_filter.csv")
+                    if os.path.exists(filter_path):
+                        with open(filter_path, encoding="UTF-8") as f:
+                            self.name_filter.update(f.readline().split(","))
+                        print("Downloading ids of actors")
+                        print(f"Downloaded {len(self.name_filter)} ids")
+                    if not self.name_filter:
+                        errors_str = "\n\n".join(
+                            [
+                                f"Function: {func} operating on file {file} raised error:\n{error}"
+                                for func, file, error in errors
+                            ]
+                        )
+                        raise Exception(
+                            f"\nFirst must be loaded the title_principals file\n{errors_str}"
+                        )
+
+                # ACTORS
+                self.current_chunk = manager.Counter(0)
+                func = self.transform_name_basics
+                file = "name_basics.tsv"
+                try:
+                    self.multi_process_transform(
+                        func=func,
+                        file=file,
+                        cols=["nconst", "primaryName", "birthYear", "deathYear"],
+                        chunksize=5000,
+                    )
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Failed to parse from file")
+
+                if errors:
                     errors_str = "\n\n".join(
                         [
                             f"Function: {func} operating on file {file} raised error:\n{error}"
                             for func, file, error in errors
                         ]
                     )
-                    raise Exception(
-                        f"\nFirst must be loaded the title_basics file\n{errors_str}"
-                    )
+                    print(errors_str)
 
-            # AKAS
-            self.current_chunk = manager.Counter(0)
-            func = self.transform_title_akas
-            file = "title_akas.tsv"
+        if load_db:
+            if not os.listdir(self.transformed_dir):
+                print("No data to transform")
+            else:
+                self.load_all()
+
+        if delete_raw:
             try:
-                self.multi_process_transform(
-                    func=func,
-                    file=file,
-                    cols=["titleId", "title", "region"],
-                    chunksize=5000,
-                )
+                shutil.rmtree(self.raw_dir)
             except Exception as e:
-                errors.append((func.__name__, file, e))
-                print(f"\n{file}: Failed to parse from file")
+                print(f"Could't remove raw data. Error: {e}")
+            else:
+                print("Raw data deleted successfully")
 
-            # CAST
-            self.current_chunk = manager.Counter(0)
-            func = self.transform_title_principals
-            file = "princ.tsv"
+        if delete_transformed:
             try:
-                self.multi_process_transform(
-                    func=func,
-                    file=file,
-                    cols=["tconst", "nconst", "category", "characters"],
-                    chunksize=5000,
-                )
-                if self.title_filter:
-                    with open(
-                        os.path.join(self.data_dir, "name_filter.csv"),
-                        "w",
-                        encoding="utf-8",
-                    ) as f:
-                        f.write(",".join(self.title_filter))
-                name_flag = True
+                shutil.rmtree(self.transformed_dir)
             except Exception as e:
-                errors.append((func.__name__, file, e))
-                print(f"\n{file}: Failed to parse from file")
-
-            # RATINGS
-            self.name_filter = self.name_filter._getvalue()
-            self.current_chunk = manager.Counter(0)
-            func = self.transform_ratings
-            file = "title_ratings.tsv"
-            try:
-                self.multi_process_transform(func=func, file=file, chunksize=500)
-            except Exception as e:
-                errors.append((func.__name__, file, e))
-                print(f"\n{file}: Failed to parse from file")
-
-            if name_flag:
-                self.name_filter = set()
-                filter_path = os.path.join(self.data_dir, "name_filter.csv")
-                if os.path.exists(filter_path):
-                    with open(filter_path, encoding="UTF-8") as f:
-                        self.name_filter.update(f.readline().split(","))
-                    print("Downloading ids of actors")
-                    print(f"Downloaded {len(self.name_filter)} ids")
-                if not self.name_filter:
-                    errors_str = "\n\n".join(
-                        [
-                            f"Function: {func} operating on file {file} raised error:\n{error}"
-                            for func, file, error in errors
-                        ]
-                    )
-                    raise Exception(
-                        f"\nFirst must be loaded the title_principals file\n{errors_str}"
-                    )
-
-            # ACTORS
-            self.current_chunk = manager.Counter(0)
-            func = self.transform_name_basics
-            file = "names.tsv"
-            try:
-                self.multi_process_transform(
-                    func=func,
-                    file=file,
-                    cols=["nconst", "primaryName", "birthYear", "deathYear"],
-                    chunksize=5000,
-                )
-            except Exception as e:
-                errors.append((func.__name__, file, e))
-                print(f"\n{file}: Failed to parse from file")
-
-            if errors:
-                errors_str = "\n\n".join(
-                    [
-                        f"Function: {func} operating on file {file} raised error:\n{error}"
-                        for func, file, error in errors
-                    ]
-                )
-                print(errors_str)
-
-            if load_db:
-                if not os.listdir(self.transformed_dir):
-                    print("No data to transform")
-                else:
-                    info = self.multi_process_load()
-                    if info:
-                        print(*info, sep="\n")
-
-            if delete_raw:
-                try:
-                    shutil.rmtree(self.raw_dir)
-                except Exception as e:
-                    print(f"Could't remove raw data. Error: {e}")
-                else:
-                    print("Raw data deleted successfully")
-
-            if delete_transformed:
-                try:
-                    shutil.rmtree(self.transformed_dir)
-                except Exception as e:
-                    print(f"Could't remove transformed data. Error: {e}")
-                else:
-                    print("Transformed data deleted successfully")
+                print(f"Could't remove transformed data. Error: {e}")
+            else:
+                print("Transformed data deleted successfully")
 
 
 def load_arg_parser():
@@ -426,11 +437,23 @@ def load_arg_parser():
         action="store_true",
         help="Enable deleting transformed data.",
     )
+
+    parser.add_argument(
+        "-nt",
+        "--not_transform",
+        action="store_true",
+        help="Disable data transformation",
+    )
     return parser
 
 
 if __name__ == "__main__":
     arg_parser = load_arg_parser()
     p = Parser(DATABASE_URL)
-    p.run(load_db=False, delete_raw=False, delete_transformed=False)
-    # p.run(load_db=arg_parser.load_db, delete_raw=arg_parser.delete_raw, delete_transformed=arg_parser.delete_transformed)
+    # p.run(load_db=False, delete_raw=False, delete_transformed=False, transform=True)
+    p.run(
+        load_db=arg_parser.load_db,
+        delete_raw=arg_parser.delete_raw,
+        delete_transformed=arg_parser.delete_transformed,
+        transform= not (arg_parser.not_transform),
+    )
