@@ -5,6 +5,7 @@ import math
 import multiprocessing as mp
 import time
 import shutil
+import tempfile
 from sqlalchemy import create_engine
 from multiprocessing.managers import BaseManager
 from typing import Iterable, Callable
@@ -86,7 +87,7 @@ class Parser:
             with open(file_path, encoding="UTF-8") as file:
                 conn = create_engine(self.database_url).raw_connection()
                 cursor = conn.cursor()
-                cmd = f'COPY "{table}"({file.readline()}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE)'
+                cmd = f'COPY "{table}"({file.readline()}) FROM STDIN WITH (FORMAT CSV, HEADER FALSE)'
                 cursor.copy_expert(cmd, file)
                 conn.commit()
         except Exception as e:
@@ -144,18 +145,18 @@ class Parser:
         files = filter(lambda x: x not in ignore_files, transformed_files)
 
         for file in files:
-            print(f"Starting loading data {file}")
+            print(f"Starting loading data {file}", flush=True)
             start_time = time.time_ns()
             try:
                 self.load_to_db(
                     os.path.join(self.transformed_dir, file), file.rsplit(".csv", 1)[0]
                 )
             except Exception as e:
-                print(e)
+                print(e, flush=True)
             else:
-                print("End of loading data")
+                print("End of loading data", flush=True)
                 print(
-                    f"Data {file} loaded. Runtime: {(time.time_ns() - start_time)/1e9:.3f}"
+                    f"Data {file} loaded. Runtime: {(time.time_ns() - start_time)/1e9:.3f}", flush=True
                 )
 
     # -----------------------------------------
@@ -246,6 +247,23 @@ class Parser:
         if not chunk_copy.empty:
             self.save_to_file(chunk_copy, "ratings")
 
+    def check_actors(self):
+        existing_actors = set()
+        actors_path = os.path.join(self.transformed_dir, "actors.csv")
+        cast_path = os.path.join(self.transformed_dir, "cast.csv")
+        
+        with open(actors_path, encoding="UTF-8") as actors:
+            actors.readline()
+            existing_actors = {line.split(",")[0] for line in actors}
+
+        with tempfile.NamedTemporaryFile(mode="a", encoding="UTF-8", delete=False) as new_cast:
+            with open(cast_path, encoding="UTF-8") as cast:
+                new_cast.write(cast.readline())
+                new_cast.writelines([line for line in cast if line.split(',')[1] in existing_actors])
+            
+        shutil.move(new_cast.name, cast_path)
+        del new_cast
+            
     def run(
         self, load_db=False, delete_raw=False, delete_transformed=False, transform=True
     ):
@@ -383,6 +401,14 @@ class Parser:
                     errors.append((func.__name__, file, e))
                     print(f"\n{file}: Failed to parse from file")
 
+                func = self.check_actors
+                file = "cast.csv"
+                try:
+                    func()
+                except Exception as e:
+                    errors.append((func.__name__, file, e))
+                    print(f"\n{file}: Erorr in checking transformed cast file")
+                
                 if errors:
                     errors_str = "\n\n".join(
                         [
@@ -418,9 +444,14 @@ class Parser:
 def load_args():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Script to transform and load previous extracted data from data_scraper.py")
+    parser = argparse.ArgumentParser(
+        description="Script to transform and load previous extracted data from data_scraper.py"
+    )
     parser.add_argument(
-        "-nL", "--load_db", action="store_false", help="Disable loading to the database."
+        "-nL",
+        "--not_load",
+        action="store_false",
+        help="Disable loading to the database.",
     )
 
     parser.add_argument(
@@ -428,7 +459,8 @@ def load_args():
     )
 
     parser.add_argument(
-        "-dt", "--delete_transformed",
+        "-dt",
+        "--delete_transformed",
         action="store_true",
         help="Enable deleting transformed data.",
     )
@@ -439,7 +471,7 @@ def load_args():
         action="store_false",
         help="Disable data transformation",
     )
-    
+
     return parser.parse_args()
 
 
@@ -447,8 +479,8 @@ if __name__ == "__main__":
     args = load_args()
     p = Parser(DATABASE_URL)
     p.run(
-        load_db=args.load_db,
+        load_db=args.not_load,
         delete_raw=args.delete_raw,
         delete_transformed=args.delete_transformed,
-        transform=args.not_transform
+        transform=args.not_transform,
     )

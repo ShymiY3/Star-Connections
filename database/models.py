@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, Float
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
 
@@ -15,9 +14,9 @@ class Movies(Base):
     original_title = Column(String, nullable=False)  # originalTitle
     start_year = Column(Integer)  # startYear
 
-    aka = relationship("Akas", back_populates="movie", cascade='all, delete-orphan')
-    rating = relationship("Ratings", back_populates="movie", cascade='all, delete-orphan')
-    cast = relationship("Cast", back_populates="movie", cascade='all, delete-orphan')
+    aka = relationship("Akas", back_populates="movie", cascade='all, delete', passive_deletes=True)
+    rating = relationship("Ratings", back_populates="movie", cascade='all, delete', passive_deletes=True)
+    cast = relationship("Cast", back_populates="movie", cascade='all, delete', passive_deletes=True)
 
 
 class Akas(Base):
@@ -40,7 +39,7 @@ class Actors(Base):
     birth_year = Column(Float)  # birthYear
     death_year = Column(Float)  # deathYear
 
-    cast = relationship("Cast", back_populates="actor", cascade='all, delete-orphan')
+    cast = relationship("Cast", back_populates="actor", cascade='all, delete', passive_deletes=True)
 
 
 class Cast(Base):
