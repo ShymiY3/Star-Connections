@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base
+from .models import Base
 from dotenv import load_dotenv
 
 env_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)

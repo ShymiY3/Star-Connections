@@ -39,7 +39,7 @@ class Actors(Base):
     birth_year = Column(Float)  # birthYear
     death_year = Column(Float)  # deathYear
 
-    cast = relationship("Cast", back_populates="actor", cascade='all, delete', passive_deletes=True)
+    cast = relationship("Cast", back_populates="actor" ,cascade='all, delete', passive_deletes=True)
 
 
 class Cast(Base):
@@ -47,8 +47,8 @@ class Cast(Base):
     __tablename__ = "cast"
 
     id = Column(Integer, index=True, primary_key=True, autoincrement=True)
-    movie_id = Column(String, ForeignKey("movies.id", ondelete='CASCADE'), nullable=False)
-    actor_id = Column(String, ForeignKey("actors.id", ondelete='CASCADE'), nullable=False)
+    movie_id = Column(String, ForeignKey("movies.id", ondelete='CASCADE'), index=True, nullable=False)
+    actor_id = Column(String, ForeignKey("actors.id", ondelete='CASCADE'), index=True, nullable=False)
     characters = Column(String)
 
     movie = relationship("Movies", back_populates="cast")
