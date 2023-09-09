@@ -9,7 +9,11 @@ import tempfile
 from sqlalchemy import create_engine
 from multiprocessing.managers import BaseManager
 from typing import Iterable, Callable
-from database import DATABASE_URL
+from dotenv import load_dotenv
+
+env_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+load_dotenv(os.path.join(env_dir, '.env'))
+DATABASE_URL = f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_ADDRESS')}:5432/star_connectionsdb"
 
 
 def init_pool_processes(the_lock):

@@ -1,0 +1,52 @@
+{% extends "base.html" %} 
+{% block head_content %}
+<style>
+    /* CSS for the overlay */
+    #calculating-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7); /* Slightly darkened background */
+        z-index: 999; /* Ensures the overlay is on top of other content */
+        text-align: center;
+    }
+
+    #overlay-content {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: gray; /* Background color for the overlay content */
+        padding: 20px;
+        border-radius: 5px;
+    }
+</style>
+{% endblock head_content %}
+
+{% block content %}
+<div id="calculating-overlay" style="display: none;">
+    <div id="overlay-content">
+        <p>Calculating...</p>
+    </div>
+</div>
+
+<form method="post" id="calculation-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" id="calculate-button">Calculate</button>
+</form>
+{% endblock content %}
+{% block scripts%}
+ {% comment %} <script>
+    // JavaScript function to handle form submission
+    document.getElementById('calculation-form').addEventListener('submit', function(event) {
+        event.preventDefault(); // Prevent the default form submission
+
+        // Display the "calculating" overlay
+        document.getElementById('calculating-overlay').style.display = 'block';
+    });
+</script>  {% endcomment %}
+{% endblock scripts %}
