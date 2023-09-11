@@ -18,10 +18,16 @@ Star Connections is a project that utilizes ETL (Extract, Transform, Load) to sc
 ```
 git clone https://github.com/ShymiY3/Star-Connections.git
 ```
-### Create a Virtual Environment
+### Create a Virtual Environment (Windows)
 ```
 python -m venv venv
 ```
+
+### Activate Virtual Environment (Windows)
+```
+venv\Scripts\Activate
+```
+
 ### Install Dependencies
 ```
 pip install -r requirements.txt
