@@ -1,25 +1,19 @@
 {% extends "base.html" %} 
 {% block content %}
-<div id="calculating-overlay" style="display: none;">
-    <div id="overlay-content">
-        <p>Calculating...</p>
-    </div>
+
+
+<div class="container centered-form">
+    <form class="limited-width" method='post' id='form'>
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="start_actor" class="form-label">{{form.start_actor.label_tag}}</label>
+            {{form.start_actor}}
+        </div>
+        <div class="mb-3">
+            <label for="goal_actor" class="form-label">{{form.goal_actor.label_tag}}</label>
+            {{form.goal_actor}}
+        </div>
+        <button type="submit" id="button" class="btn btn-secondary">Submit</button>
+    </form>
 </div>
-
-<form method="post" id="calculation-form">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit" id="calculate-button">Calculate</button>
-</form>
 {% endblock content %}
-{% block scripts%}
- {% comment %} <script>
-    // JavaScript function to handle form submission
-    document.getElementById('calculation-form').addEventListener('submit', function(event) {
-        event.preventDefault(); // Prevent the default form submission
-
-        // Display the "calculating" overlay
-        document.getElementById('calculating-overlay').style.display = 'block';
-    });
-</script>  {% endcomment %}
-{% endblock scripts %}

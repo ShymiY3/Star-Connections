@@ -1,0 +1,67 @@
+{% extends "base.html" %} {% block content %}
+<table class="table  table-bordered table-dark">
+  <thead>
+    <tr>
+      <th>Movies</th>
+      <th>Rating</th>
+      <th>Actor</th>
+      <th>Characters</th>
+    </tr>
+  </thead>
+  <tbody align="center" class='align-middle'>
+    {% comment %} 'movie':movie_info, 'prev_actor':prev_actor_info,
+    'next_actor':next_actor_info, 'prev_characters':"
+    ".join(prev_characters_info), 'next_characters':"
+    ".join(next_characters_info) {% endcomment %} 
+    {% if data|length == 0 %}
+    <tr>
+      <td colspan="3">The same actor</td>
+    </tr>
+    {% elif data|length == 1 %}
+    <tr>
+      <td rowspan="2">{{data.0.movie}}</td>
+      <td rowspan="2">{{data.0.rating}}</td>
+      <td>{{data.0.prev_actor}}</td>
+      <td>{{data.0.prev_characters}}</td>
+    </tr>
+    <tr>
+      <td>{{data.0.next_actor}}</td>
+      <td>{{data.0.next_characters}}</td>
+    </tr>
+    {% else %} {% for item in data %}
+     {% if forloop.first %}
+    <tr>
+      <td rowspan="2">{{item.movie}}</td>
+      <td rowspan="2">{{item.rating}}</td>
+      <td>{{item.prev_actor}}</td>
+      <td>{{item.prev_characters}}</td>
+    </tr>
+    <tr>
+      <td rowspan="2">{{item.next_actor}}</td>
+      <td>{{item.next_characters}}</td>
+      </tr>
+    {% elif forloop.last %}
+    <tr>
+      <td rowspan="2">{{item.movie}}</td>
+      <td rowspan="2">{{item.rating}}</td>
+      <td>{{item.prev_characters}}</td>
+    </tr>
+    <tr>
+      <td>{{item.next_actor}}</td>
+      <td>{{item.next_characters}}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td rowspan="2">{{item.movie}}</td>
+      <td rowspan="2">{{item.rating}}</td>
+      <td>{{item.prev_characters}}</td>
+    </tr>
+    <tr>
+      <td rowspan="2">{{item.next_actor}}</td>
+      <td>{{item.next_characters}}</td>
+    </tr>
+    {% endif %} {% endfor %} {% endif %}
+  </tbody>
+</table>
+
+{% endblock content %}

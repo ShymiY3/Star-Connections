@@ -20,7 +20,7 @@ class Actors(models.Model):
 
 
 class Akas(models.Model):
-    movie = models.ForeignKey('Movies', on_delete=models.CASCADE)
+    movie = models.ForeignKey('Movies', on_delete=models.CASCADE, related_name='aka')
     title = models.CharField(max_length=250)
     region = models.CharField(max_length=10)
 
@@ -30,8 +30,8 @@ class Akas(models.Model):
 
 
 class Cast(models.Model):
-    movie = models.ForeignKey('Movies', on_delete=models.CASCADE)
-    actor = models.ForeignKey(Actors, on_delete=models.CASCADE)
+    movie = models.ForeignKey('Movies', on_delete=models.CASCADE, related_name='cast')
+    actor = models.ForeignKey(Actors, on_delete=models.CASCADE, related_name='cast')
     characters = models.CharField(blank=True, null=True, max_length=400)
 
     class Meta:
@@ -50,7 +50,7 @@ class Movies(models.Model):
 
 
 class Ratings(models.Model):
-    movie = models.ForeignKey(Movies, on_delete=models.CASCADE)
+    movie = models.ForeignKey(Movies, on_delete=models.CASCADE,related_name='rating')
     average = models.FloatField()
     num_votes = models.IntegerField()
 

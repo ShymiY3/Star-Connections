@@ -1,8 +1,17 @@
 {% extends "base.html" %} 
 {% block content %}
-<form method="post" id="choices-form">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit" id="choices-button">Submit</button>
-</form>
+<div class="container centered-form">
+    <form class="limited-width" method='post' id='form'>
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="start_actor" class="form-label">{{form.start_actor.label_tag}}</label>
+            {{form.start_actor}}
+        </div>
+        <div class="mb-3">
+            <label for="goal_actor" class="form-label">{{form.goal_actor.label_tag}}</label>
+            {{form.goal_actor}}
+        </div>
+        <button type="submit" id="button" class="btn btn-secondary">Submit</button>
+    </form>
+</div>
 {% endblock content %}

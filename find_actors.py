@@ -4,6 +4,7 @@ from queue import Queue, PriorityQueue
 from sqlalchemy import select, func
 from typing_extensions import Self
 import time
+from functools import lru_cache
 
 class Node:
     def __init__(
@@ -43,7 +44,6 @@ class Find_Actor_BFS:
         self.max_layer = 6
         self.solution = None
         self.current_layer = -1
-        self.explored_movies = set()
 
     def get_neighbors(self, actor_id: str):
         """Getting all actors who worked with current actor
@@ -73,7 +73,8 @@ class Find_Actor_BFS:
         """
         query = select(func.count()).select_from(Cast).where(Cast.actor_id == actor_id).order_by(None)
         return self.session.scalar(query)
-        
+    
+    @lru_cache
     def find_actor(self):
         """Function with implemented algorithm to search for shortest path between 2 actors
 
@@ -85,7 +86,6 @@ class Find_Actor_BFS:
             List: List of pairs (movie, actors) where movie is common movie and actor is person that worked with previous; 
             In first tuple movie is empty string
         """
-        self.explored_movies = set()
         start = Node(self.start_id)
         marked = set(self.start_id)
         frontier = PriorityQueue()
@@ -119,25 +119,21 @@ class Find_Actor_BFS:
                 self.runtime = (time.time_ns() - start_time) / 1e9
                 return self.solution
 
-            before_neigh = time.time_ns()
             for movie, actor in self.get_neighbors(node.actor):
                 if actor in marked:
                     continue
                 marked.add(actor)
                 layer = node.layer + 1
                 child = Node(actor, node, movie, layer)
-                timestamp = time.time_ns()
                 priority = (layer*1e3)-self.get_movie_count(actor)
-                print(f'Priority {(time.time_ns() - timestamp)/1e9:.3f}')
                 if actor == self.goal_id:
                     frontier = Queue()
                     frontier.put((priority, child))
                     break
                 frontier.put((priority, child))
             
-    
     @classmethod
-    def run(cls, start_id, goal_id, return_instance = False):
+    def run(cls, start_id, goal_id, return_instance = False, print_solution = False):
         """Class method for easier running the algorithm 
 
         Args:
@@ -150,6 +146,8 @@ class Find_Actor_BFS:
         """
         inst = cls(start_id, goal_id)
         results = inst.find_actor()
+        if print_solution:
+            inst.print_solution()
         if return_instance:
             return inst, results
         return results
@@ -164,10 +162,7 @@ class Find_Actor_BFS:
 
 
 def main():
-    obj = Find_Actor_BFS("nm1500155", "nm3053338")
-    obj.find_actor()
-    obj.print_solution()
-    return
+    obj = Find_Actor_BFS.run("nm1500155", "nm3053338", return_instance=True, print_solution=True)
 
 
 if __name__ == "__main__":
