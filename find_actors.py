@@ -63,11 +63,17 @@ class Find_Actor_BFS:
         return self.session.execute(query).all()
     
     def get_movie_count(self, actor_id:str):
-        counter = self.session.query(Cast).statement.with_only_columns([func.count()])
-        counter = counter.order_by(None)
-        print(self.session.execute(counter).first())
-        return 1
-    
+        """Get numbers of movies where actor stared
+
+        Args:
+            actor_id (str): actor id
+
+        Returns:
+            int: Number of movies where actor stared
+        """
+        query = select(func.count()).select_from(Cast).where(Cast.actor_id == actor_id).order_by(None)
+        return self.session.scalar(query)
+        
     def find_actor(self):
         """Function with implemented algorithm to search for shortest path between 2 actors
 
@@ -89,7 +95,6 @@ class Find_Actor_BFS:
         while True:
             if frontier.empty():
                 raise Exception("No solution")
-            loop_time = time.time_ns()
             _, node = frontier.get()
             
 
@@ -123,19 +128,13 @@ class Find_Actor_BFS:
                 child = Node(actor, node, movie, layer)
                 timestamp = time.time_ns()
                 priority = (layer*1e3)-self.get_movie_count(actor)
+                print(f'Priority {(time.time_ns() - timestamp)/1e9:.3f}')
                 if actor == self.goal_id:
                     frontier = Queue()
                     frontier.put((priority, child))
                     break
                 frontier.put((priority, child))
-
-            # print("\r" + " " * 60, end="", flush=True)
-            now = time.time_ns()
-            # print(
-            #     f"\rLoop Time: {(now-loop_time)/1e9:.3f} Neighbor Time: {(now-before_neigh)/1e9:.3f}, In Q: {frontier.qsize()}, Layer: {node.layer}",
-            #     end="",
-            #     flush=True,
-            # )
+            
     
     @classmethod
     def run(cls, start_id, goal_id, return_instance = False):
