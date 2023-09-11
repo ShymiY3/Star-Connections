@@ -439,6 +439,8 @@ class Parser:
         if delete_transformed:
             try:
                 shutil.rmtree(self.transformed_dir)
+                os.remove(os.path.join(self.data_dir, 'title_filter.csv'))
+                os.remove(os.path.join(self.data_dir, 'name_filter.csv'))
             except Exception as e:
                 print(f"Could't remove transformed data. Error: {e}")
             else:
