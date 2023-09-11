@@ -38,5 +38,5 @@ class Actors_choice(forms.Form):
         
         super().__init__(*args, **kwargs)
         
-        self.fields['start_actor'].choices = [(actor.id, str(actor)) for actor in start_list]
-        self.fields['goal_actor'].choices = [(actor.id, str(actor)) for actor in goal_list]
+        self.fields['start_actor'].choices = start_list
+        self.fields['goal_actor'].choices = goal_list

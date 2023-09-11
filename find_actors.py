@@ -1,10 +1,9 @@
 from database.database import get_session
 from database.models import Cast
-from queue import Queue
-from sqlalchemy import select
+from queue import Queue, PriorityQueue
+from sqlalchemy import select, func
 from typing_extensions import Self
 import time
-
 
 class Node:
     def __init__(
@@ -27,10 +26,12 @@ class Node:
         self.common_movie = common_movie
         self.layer = layer
 
+    def __lt__(self, other):
+        return self.layer < other.layer
 
-class BFS:
+class Find_Actor_BFS:
     def __init__(self, start_id: str, goal_id: str) -> None:
-        """Init of BFS class
+        """Init of Find_Actor_BFS class
 
         Args:
             start_id (str): Id of start actor
@@ -60,7 +61,13 @@ class BFS:
         )
 
         return self.session.execute(query).all()
-
+    
+    def get_movie_count(self, actor_id:str):
+        counter = self.session.query(Cast).statement.with_only_columns([func.count()])
+        counter = counter.order_by(None)
+        print(self.session.execute(counter).first())
+        return 1
+    
     def find_actor(self):
         """Function with implemented algorithm to search for shortest path between 2 actors
 
@@ -75,15 +82,16 @@ class BFS:
         self.explored_movies = set()
         start = Node(self.start_id)
         marked = set(self.start_id)
-        frontier = Queue()
-        frontier.put(start)
+        frontier = PriorityQueue()
+        frontier.put((0, start))
         start_time = time.time_ns()
-
+        
         while True:
             if frontier.empty():
                 raise Exception("No solution")
             loop_time = time.time_ns()
-            node = frontier.get()
+            _, node = frontier.get()
+            
 
             if node.layer > self.current_layer:
                 self.current_layer = node.layer
@@ -113,20 +121,40 @@ class BFS:
                 marked.add(actor)
                 layer = node.layer + 1
                 child = Node(actor, node, movie, layer)
+                timestamp = time.time_ns()
+                priority = (layer*1e3)-self.get_movie_count(actor)
                 if actor == self.goal_id:
                     frontier = Queue()
-                    frontier.put(child)
+                    frontier.put((priority, child))
                     break
-                frontier.put(child)
+                frontier.put((priority, child))
 
-            print("\r" + " " * 60, end="", flush=True)
+            # print("\r" + " " * 60, end="", flush=True)
             now = time.time_ns()
-            print(
-                f"\rLoop Time: {(now-loop_time)/1e9:.3f} Neighbor Time: {(now-before_neigh)/1e9:.3f} Explored: , In Q: {frontier.qsize()}, Layer: {node.layer}",
-                end="",
-                flush=True,
-            )
+            # print(
+            #     f"\rLoop Time: {(now-loop_time)/1e9:.3f} Neighbor Time: {(now-before_neigh)/1e9:.3f}, In Q: {frontier.qsize()}, Layer: {node.layer}",
+            #     end="",
+            #     flush=True,
+            # )
+    
+    @classmethod
+    def run(cls, start_id, goal_id, return_instance = False):
+        """Class method for easier running the algorithm 
 
+        Args:
+            start_id (str): start_id for init method
+            goal_id (str): goal_id for init method
+            return_instance (bool, optional): Boolean to decide if method will return additionally instance. Defaults to False.
+
+        Returns:
+            tuple: Default: Tuple with results; if return_instance: returns tuple (instance , results) 
+        """
+        inst = cls(start_id, goal_id)
+        results = inst.find_actor()
+        if return_instance:
+            return inst, results
+        return results
+        
     def print_solution(self):
         """Prints solution and runtime of function
         """
@@ -137,7 +165,7 @@ class BFS:
 
 
 def main():
-    obj = BFS("nm1500155", "nm3053338")
+    obj = Find_Actor_BFS("nm1500155", "nm3053338")
     obj.find_actor()
     obj.print_solution()
     return
