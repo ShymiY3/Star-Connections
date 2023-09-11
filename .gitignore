@@ -160,5 +160,5 @@ cython_debug/
 
 testfiles/
 .vscode
-database/data
+database/data/
 *.dump
